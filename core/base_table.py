@@ -1,6 +1,6 @@
 # core/base_table.py
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Callable, Optional, Union
 
 class BaseTable(ABC):
     """

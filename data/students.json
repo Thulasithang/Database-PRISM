@@ -1,17 +1,25 @@
 {
   "name": "students",
   "columns": [
-    "id",
-    "name"
+    "name",
+    "age",
+    "grade"
   ],
   "rows": [
     [
-      1,
-      "Alice"
+      "Alice",
+      20,
+      85.5
     ],
     [
-      2,
-      "Bob"
+      "Bob",
+      22,
+      92.0
+    ],
+    [
+      "Charlie",
+      21,
+      78.5
     ]
   ]
 }
