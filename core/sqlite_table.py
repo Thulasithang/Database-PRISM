@@ -120,3 +120,31 @@ class SQLiteTable(BaseTable):
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
             return cursor.fetchone() is not None
+
+    def execute_query(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """
+        Execute a custom SQL query and return results.
+        
+        Args:
+            query: SQL query string
+            params: Query parameters as a tuple
+        
+        Returns:
+            List of dictionaries containing query results
+        
+        Example:
+            table.execute_query("SELECT * FROM users WHERE age > ?", (25,))
+        """
+        with sqlite3.connect("db.sqlite") as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            
+            # If SELECT query, return results
+            if query.strip().upper().startswith("SELECT"):
+                columns = [description[0] for description in cursor.description]
+                rows = cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+            
+            # For other queries (INSERT, UPDATE, DELETE), commit and return empty list
+            conn.commit()
+            return []
