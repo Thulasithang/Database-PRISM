@@ -59,6 +59,7 @@ class SQLTransformer(Transformer):
     def value_list(self, *vals): return list(vals)
 
     def create_stmt(self, table, columns):
+        print(f"Creating table: {table} with columns: {columns}")
         return {
             "type": "create_table",
             "table": str(table),
@@ -70,15 +71,36 @@ class SQLTransformer(Transformer):
     def create_column(self, name, type_):
         return {"name": str(name), "datatype": str(type_)}
 
-    def value(self, v): return v[1:-1] if isinstance(v, str) and v.startswith("'") else v
+    def value(self, v):
+        if isinstance(v, str):
+            if v.startswith("'") or v.startswith('"'):
+                return v[1:-1]  # strip quotes
+            elif v.isdigit():
+                return int(v)
+            try:
+                return float(v)
+            except ValueError:
+                return v
+        elif isinstance(v):
+            if v.type == "SIGNED_NUMBER":
+                if '.' in v:
+                    return float(v)
+                else:
+                    return int(v)
+            elif v.type == "ESCAPED_STRING":
+                return v.value[1:-1]
+            else:
+                return v.value
+        return v
+
 
 
 parser = Lark(sql_grammar, parser='lalr', transformer=SQLTransformer())
 
-sql1 = "SELECT name, age FROM users WHERE age >= 25 AND name != 'Alice'"
-sql2 = "INSERT INTO users (name, age) VALUES ('Bob', 30)"
-sql3 = "CREATE TABLE users (id INT, name TEXT)"
+# sql1 = "SELECT name, age FROM users WHERE age >= 25 AND name != 'Alice'"
+# sql2 = "INSERT INTO users (name, age) VALUES ('Bob', 30)"
+# sql3 = "CREATE TABLE users (id INT, name TEXT)"
 
-print(parser.parse(sql1))
-print(parser.parse(sql2))
-print(parser.parse(sql3))
+# print(parser.parse(sql1))
+# print(parser.parse(sql2))
+# print(parser.parse(sql3))
