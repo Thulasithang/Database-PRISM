@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import List, Any, Optional
 from core.json_table import JSONTable
 from core.base_table import BaseTable
 import operator
@@ -60,17 +60,19 @@ class Executor:
         table.save()
         # self.storage.insert(values)
 
-    def select(self, criteria: List[dict] = [], columns: List[str] = ['all']) -> List[dict]:
+    def select(self, criteria: Optional[List[dict]] = None, columns: Optional[List[str]] = None) -> Optional[List[dict]]:
         """
-        Select rows from the table based on the given criteria.
-
-        Args:
-            criteria: Dictionary of column names and values to filter by.
-
-        Returns:
-            List of rows matching the criteria.
+        Select rows from the table based on the given criteria and selected columns.
         """
+        print("columns: ", columns)
+        print("criteria: ", criteria)
+        if criteria is None:
+            criteria = []
+        if columns is None:
+            columns = ['all']
+
         self.storage = JSONTable.load(self.table_name)
+
         if self.storage_type != "json":
             raise ValueError(f"Unsupported storage type: {self.storage_type}")
         if not self.storage.exists(self.table_name):
@@ -78,26 +80,27 @@ class Executor:
         
         print("Selecting rows with criteria:", criteria)
         all_rows = self.storage.select_all()
-        if columns == ['all']:
-            columns = self.storage.columns
-        if len(criteria) == 0:
-            return all_rows
-        filtered_rows = [
-            row for row in all_rows
-            if all(
-                ops[condition["operator"]](row[condition["column"]], condition["value"])
-                for condition in criteria
-                if condition["operator"] in ops and condition["column"] in row
-            )
-        ]
+
+        # Apply filtering
+        if criteria:
+            filtered_rows = [
+                row for row in all_rows
+                if all(
+                    ops[condition["operator"]](row[condition["column"]], condition["value"])
+                    for condition in criteria
+                    if condition["operator"] in ops and condition["column"] in row
+                )
+            ]
+        else:
+            filtered_rows = all_rows
+
+        print("Filtering rows by columns:", columns)
+
+        # Apply column selection
         if columns != ['all']:
             filtered_rows = [
                 {col: row[col] for col in columns if col in row}
                 for row in filtered_rows
             ]
-        if len(filtered_rows) == 0:
-            return None
-        else:
-            return filtered_rows
 
-        
+        return filtered_rows if filtered_rows else None

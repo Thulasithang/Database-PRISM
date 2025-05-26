@@ -139,10 +139,11 @@ def validate_select_ir(ir, schema):
             schema = json.load(file)
             try:
                 # Step 2: Validate columns
-                for column in ir["columns"]:
-                    if column not in schema["columns"]:
-                        print(f"Column {column} does not exist in table {ir['table']}.")
-                        raise ValueError(f"Column {column} does not exist in table {ir['table']}.")
+                if ir["columns"] != ["all"]:
+                        for column in ir["columns"]:
+                            if column not in schema["columns"]:
+                                print(f"Column {column} does not exist in table {ir['table']}.")
+                                raise ValueError(f"Column {column} does not exist in table {ir['table']}.")
 
                 # Step 3: Validate filters
                 for filter_condition in ir["filters"]:
