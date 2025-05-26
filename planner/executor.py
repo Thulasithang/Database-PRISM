@@ -1,6 +1,18 @@
 from typing import List, Any
 from core.json_table import JSONTable
 from core.base_table import BaseTable
+import operator
+
+ops = {
+    "==": operator.eq,
+    "!=": operator.ne,
+    "<": operator.lt,
+    "<=": operator.le,
+    ">": operator.gt,
+    ">=": operator.ge,
+    "in": lambda x, y: x in y,
+    "not in": lambda x, y: x not in y
+}
 
 class Executor:
     def __init__(self, table_name: str, storage_type: str = "json"):
@@ -48,7 +60,7 @@ class Executor:
         table.save()
         # self.storage.insert(values)
 
-    def select(self, criteria: dict) -> List[dict]:
+    def select(self, criteria: List[dict] = []) -> List[dict]:
         """
         Select rows from the table based on the given criteria.
 
@@ -58,9 +70,27 @@ class Executor:
         Returns:
             List of rows matching the criteria.
         """
+        self.storage = JSONTable.load(self.table_name)
+        if self.storage_type != "json":
+            raise ValueError(f"Unsupported storage type: {self.storage_type}")
         if not self.storage.exists(self.table_name):
             raise ValueError(f"Table '{self.table_name}' does not exist.")
-        rows = self.storage.scan(self.table_name)
-        return self.filter_and_project(rows, criteria)
+        
+        print("Selecting rows with criteria:", criteria)
+        all_rows = self.storage.select_all()
+        if len(criteria) == 0:
+            return all_rows
+        filtered_rows = [
+            row for row in all_rows
+            if all(
+                ops[condition["operator"]](row[condition["column"]], condition["value"])
+                for condition in criteria
+                if condition["operator"] in ops and condition["column"] in row
+            )
+        ]
+        if len(filtered_rows) == 0:
+            return None
+        else:
+            return filtered_rows
 
         

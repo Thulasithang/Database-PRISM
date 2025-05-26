@@ -31,10 +31,15 @@ while True:
         elif ir["type"] == "insert":
             executor.insert(ir["values"])
         elif ir["type"] == "select":
-            results = executor.select(ir["criteria"])
+            results = executor.select(ir["filters"])
             print("Query Results:")
-            for row in results:
-                print(row)
+            if results:
+                for row in results:
+                    print(row)
+            else:
+                print("No results found.")
+        else:
+            print("Unsupported IR type:", ir["type"])
 
     except Exception as e:
         print("Error parsing SQL query:")
