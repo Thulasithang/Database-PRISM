@@ -2,6 +2,7 @@ from parser.lark_parser import parser
 from IR.intermediateRepresentation import generate_ir, validate_ir, pretty_print_ir, inline_udf_in_ir
 from IR.udf.manager import UDFManager
 from core.table_manager import TableManager
+from planner.executor import Executor  # Required if you're still using Executor in some contexts
 import json
 import os
 import re
