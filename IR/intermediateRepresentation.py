@@ -2,13 +2,14 @@ def generate_ir(parsed_query):
     # Step 1: Extract relevant information from the parsed query
     print("Generating IR from parsed query: ", parsed_query)
     type = parsed_query.get("type")
-    condition = "from" if type == "select" else "into" if type == "insert" else "table" if type == "create_table" else None
+    condition = "from" if type == "select" else "table" if type == "insert" else "table" if type == "create_table" else None
     print("condition: ", condition)
     table_name = parsed_query.get(condition, None)
     if not table_name:
         raise ValueError("Table name not found in parsed query.")
     columns = parsed_query.get("columns", [])
     filters = parsed_query.get("where", [])
+    values = parsed_query.get("values", [])
 
     print("type: ", type)
     print("table_name: ", table_name)
@@ -24,7 +25,8 @@ def generate_ir(parsed_query):
         "type": type,
         "table": table_name,
         "columns": columns,
-        "filters": filters
+        "filters": filters,
+        "values": values
     }
 
     print("Generated IR: ", ir)
