@@ -1,6 +1,7 @@
 from parser.lark_parser import parser
 from IR.intermediateRepresentation import generate_ir, validate_ir, pretty_print_ir
 from planner.executor import Executor
+from executor.execution_engine import execute_query
 import json
 
 
@@ -25,21 +26,30 @@ while True:
         print("Pretty Printed IR:")
         print(pretty_ir)
 
-        executor = Executor(table_name=ir["table"], storage_type="json")
-        if ir["type"] == "create_table":
-            executor.create_table(ir["columns"])
-        elif ir["type"] == "insert":
-            executor.insert(ir["values"])
-        elif ir["type"] == "select":
-            results = executor.select(ir["filters"], ir["columns"])
-            print("Query Results:")
-            if results:
-                for row in results:
+        executor = execute_query(ir)
+        query_type = ir["type"]
+
+        if query_type in ("select", "show_table", "describe_table"):
+            # Expected to return (schema, rows)
+            schema, rows = result
+            print("Schema:", schema)
+            if rows:
+                print("Rows:")
+                for row in rows:
                     print(row)
             else:
-                print("No results found.")
+                print("No rows found.")
+        elif query_type in ("insert", "update", "delete", "create_table", "drop_table",
+                            "rename_table"):
+            # Other known query types returning dict or status messages
+            if isinstance(result, dict):
+                print("Execution Result:")
+                for field_name, field_value in result.items():
+                    print(f"{field_name}: {field_value}")
+            else:
+                print("Execution Result:", result)
         else:
-            print("Unsupported IR type:", ir["type"])
+            print("Unsupported IR type:", query_type)
 
     except Exception as e:
         print("Error parsing SQL query:")
