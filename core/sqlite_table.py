@@ -18,6 +18,7 @@ class SQLiteTable(BaseTable):
         self.name = name
         self.columns = columns
         self.col_types = col_types or {col: "TEXT" for col in columns}
+        self._registered_udfs = {}
         self._create_table()
 
     def _create_table(self):
@@ -136,6 +137,10 @@ class SQLiteTable(BaseTable):
             table.execute_query("SELECT * FROM users WHERE age > ?", (25,))
         """
         with sqlite3.connect("db.sqlite") as conn:
+            # Register any UDFs that have been added
+            for func_name, (num_params, func) in self._registered_udfs.items():
+                conn.create_function(func_name, num_params, func)
+            
             cursor = conn.cursor()
             cursor.execute(query, params)
             
@@ -148,3 +153,16 @@ class SQLiteTable(BaseTable):
             # For other queries (INSERT, UPDATE, DELETE), commit and return empty list
             conn.commit()
             return []
+
+    def register_udf(self, name: str, num_params: int, func: callable) -> None:
+        """
+        Register a User-Defined Function (UDF) for use in SQL queries.
+        
+        Args:
+            name: Name of the function as it will be used in SQL
+            num_params: Number of parameters the function takes
+            func: The Python function to register
+        """
+        if not hasattr(self, '_registered_udfs'):
+            self._registered_udfs = {}
+        self._registered_udfs[name] = (num_params, func)
