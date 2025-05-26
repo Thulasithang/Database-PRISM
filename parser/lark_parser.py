@@ -8,8 +8,8 @@ stmt: select_stmt | insert_stmt | create_table_stmt | create_function_stmt
 select_stmt: "SELECT" column_list "FROM" NAME where_clause?
 where_clause: "WHERE" condition
 condition: function_call | comparison
-comparison: column op value
-op: "=" | "!=" | ">" | "<" | ">=" | "<="
+comparison: expr OPERATOR expr
+OPERATOR: ">=" | "<=" | ">" | "<" | "=" | "!="
 
 column_list: column ("," column)*
 column: NAME | function_call
@@ -21,16 +21,23 @@ create_table_stmt: "CREATE" "TABLE" NAME "(" create_column_list ")"
 create_column_list: create_column ("," create_column)*
 create_column: NAME TYPE
 
-create_function_stmt: "CREATE" "FUNCTION" NAME "(" param_list ")" "RETURNS" TYPE "BEGIN" function_body "END" ";"
+create_function_stmt: "CREATE" "FUNCTION" NAME "(" param_list ")" "RETURNS" TYPE function_body
 param_list: param ("," param)*
 param: NAME TYPE
-function_body: /[^;]*;/+
+function_body: "BEGIN" stmt_list "END" ";"
+stmt_list: if_stmt | return_stmt
+if_stmt: "IF" comparison "THEN" return_stmt "ELSE" return_stmt "END" "IF" ";"
+return_stmt: "RETURN" expr ";"
 
-function_call: NAME "(" value_list ")"
-value: STRING | SIGNED_NUMBER | NAME | function_call
+function_call: NAME "(" value_list? ")"
+expr: arithmetic_expr | value
+arithmetic_expr: value ARITH_OP value
+ARITH_OP: "+" | "-" | "*" | "/"
+value: STRING | SIGNED_NUMBER | NAME | function_call | BOOL
+BOOL: "true" | "false"
 
 NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
-TYPE: "INT" | "TEXT" | "FLOAT"
+TYPE: "INT" | "TEXT" | "FLOAT" | "BOOL"
 STRING: /'[^']*'/ | /"[^"]*"/
 
 %import common.ESCAPED_STRING
@@ -50,7 +57,7 @@ class SQLTransformer(Transformer):
     def select_stmt(self, *args):
         cols = args[0]
         table = args[1]
-        where = args[2] if len(args) > 2 else []
+        where = args[2] if len(args) > 2 else None
         return {
             "type": "select",
             "columns": cols,
@@ -64,14 +71,15 @@ class SQLTransformer(Transformer):
     def condition(self, cond):
         return cond
 
-    def comparison(self, column, op, value):
+    def comparison(self, left, op, right):
         return {
-            "left": column,
+            "type": "comparison",
+            "left": left,
             "op": str(op),
-            "right": value
+            "right": right
         }
 
-    def op(self, op):
+    def OPERATOR(self, op):
         return str(op)
 
     def column_list(self, *items): 
@@ -81,7 +89,6 @@ class SQLTransformer(Transformer):
         return item
 
     def insert_stmt(self, *args):
-        # Extract relevant parts from args
         table = None
         columns = None
         values = None
@@ -95,9 +102,6 @@ class SQLTransformer(Transformer):
                 elif values is None:
                     values = arg
                     
-        if table is None or columns is None or values is None:
-            raise ValueError("Invalid INSERT statement")
-            
         return {
             "type": "insert",
             "table": str(table),
@@ -109,7 +113,6 @@ class SQLTransformer(Transformer):
         return list(vals)
 
     def create_table_stmt(self, *args):
-        # Extract table name and columns from args
         table = None
         columns = None
         for i, arg in enumerate(args):
@@ -117,10 +120,7 @@ class SQLTransformer(Transformer):
                 table = arg
             elif isinstance(arg, list) and columns is None:
                 columns = arg
-        
-        if table is None or columns is None:
-            raise ValueError("Invalid CREATE TABLE statement")
-            
+                
         return {
             "type": "create_table",
             "table": str(table),
@@ -133,32 +133,12 @@ class SQLTransformer(Transformer):
     def create_column(self, name, type_):
         return {"name": str(name), "datatype": str(type_)}
 
-    def create_function_stmt(self, *args):
-        # Extract function name, parameters, return type, and body
-        name = None
-        params = None
-        return_type = None
-        body = None
-        
-        for arg in args:
-            if isinstance(arg, str):
-                if name is None:
-                    name = arg
-                elif return_type is None:
-                    return_type = arg
-            elif isinstance(arg, list) and params is None:
-                params = arg
-            elif isinstance(arg, str) and body is None:
-                body = arg.strip()
-                
-        if name is None or params is None or return_type is None or body is None:
-            raise ValueError("Invalid CREATE FUNCTION statement")
-            
+    def create_function_stmt(self, name, params, return_type, body):
         return {
             "type": "create_function",
-            "name": name,
+            "name": str(name),
             "params": params,
-            "return_type": return_type,
+            "return_type": str(return_type),
             "body": body
         }
 
@@ -168,21 +148,56 @@ class SQLTransformer(Transformer):
     def param(self, name, type_):
         return {"name": str(name), "type": str(type_)}
 
-    def function_body(self, body):
-        return str(body)
+    def function_body(self, stmt_list):
+        return stmt_list
 
-    def function_call(self, name, args):
+    def stmt_list(self, stmt):
+        return stmt
+
+    def if_stmt(self, condition, then_stmt, else_stmt):
+        return {
+            "type": "if_stmt",
+            "condition": condition,
+            "then": then_stmt,
+            "else": else_stmt
+        }
+
+    def return_stmt(self, value):
+        return {
+            "type": "return_stmt",
+            "value": value
+        }
+
+    def expr(self, value):
+        return value
+
+    def arithmetic_expr(self, left, op, right):
+        return {
+            "type": "arithmetic",
+            "left": left,
+            "op": str(op),
+            "right": right
+        }
+
+    def ARITH_OP(self, op):
+        return str(op)
+
+    def function_call(self, name, args=None):
         return {
             "type": "function_call",
             "function_name": str(name),
-            "arguments": args
+            "arguments": args if args is not None else []
         }
+
+    def BOOL(self, value):
+        return str(value).lower()
 
     def value(self, v):
         if isinstance(v, str):
             if v.startswith("'") or v.startswith('"'):
                 return v[1:-1]  # strip quotes
-            # Try to convert to number if possible
+            elif v.lower() in ('true', 'false'):
+                return v.lower()  # preserve boolean literals
             try:
                 if '.' in v:
                     return float(v)
@@ -191,7 +206,9 @@ class SQLTransformer(Transformer):
                 return v
         elif hasattr(v, 'value'):  # Handle Token objects
             try:
-                if '.' in v.value:
+                if v.value.lower() in ('true', 'false'):
+                    return v.value.lower()
+                elif '.' in v.value:
                     return float(v.value)
                 return int(v.value)
             except ValueError:

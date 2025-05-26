@@ -3,9 +3,17 @@
   "params": [
     {
       "name": "price",
-      "type": "float"
+      "type": "INT"
     }
   ],
-  "return_type": "float",
-  "body": "price * 2.0"
+  "return_type": "INT",
+  "body": {
+    "type": "return_stmt",
+    "value": {
+      "type": "arithmetic",
+      "left": "price",
+      "op": "*",
+      "right": 2
+    }
+  }
 }

@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Union
 from .parser import UDFParser
 
 class UDFManager:
@@ -87,6 +87,15 @@ class UDFManager:
                     arg_value = float(arg)
                 elif param_type == "int":
                     arg_value = int(float(arg))  # Handle float strings that represent integers
+                elif param_type == "bool":
+                    if isinstance(arg, bool):
+                        arg_value = arg
+                    elif isinstance(arg, (int, float)):
+                        arg_value = bool(arg)
+                    elif isinstance(arg, str):
+                        arg_value = arg.lower() == 'true'
+                    else:
+                        arg_value = bool(arg)
                 else:
                     arg_value = arg
                 bindings[param["name"]] = arg_value
@@ -104,42 +113,118 @@ class UDFManager:
             elif return_type == "int":
                 return int(float(result))
             elif return_type == "bool":
-                return bool(result)
+                if isinstance(result, bool):
+                    return result
+                elif isinstance(result, (int, float)):
+                    return bool(result)
+                elif isinstance(result, str):
+                    return result.lower() == 'true'
+                else:
+                    return bool(result)
             else:
                 return result
         except (ValueError, TypeError) as e:
             raise ValueError(f"Invalid return value type: expected {return_type}, got {type(result).__name__}")
         
-    def _evaluate_expression(self, expr: str, bindings: Dict[str, Any]) -> Any:
+    def _evaluate_expression(self, expr: Union[str, Dict], bindings: Dict[str, Any]) -> Any:
         """Evaluate an expression with given variable bindings."""
-        # Replace variables with their values, longest names first to avoid partial matches
-        for var_name, value in sorted(bindings.items(), key=lambda x: len(x[0]), reverse=True):
-            # Convert value to string, handling special cases
-            if isinstance(value, bool):
-                value_str = str(value).lower()  # Convert True/False to 'true'/'false'
+        # If expr is a dict, it's a structured expression
+        if isinstance(expr, dict):
+            if expr["type"] == "if_stmt":
+                # Evaluate the condition
+                condition = expr["condition"]
+                left = self._evaluate_expression(condition["left"], bindings)
+                right = self._evaluate_expression(condition["right"], bindings)
+                op = condition["op"]
+                
+                # Evaluate comparison
+                result = False
+                if op == ">":
+                    result = left > right
+                elif op == "<":
+                    result = left < right
+                elif op == ">=":
+                    result = left >= right
+                elif op == "<=":
+                    result = left <= right
+                elif op == "=":
+                    result = left == right
+                elif op == "!=":
+                    result = left != right
+                    
+                # Execute appropriate branch
+                if result:
+                    return self._evaluate_expression(expr["then"], bindings)
+                else:
+                    return self._evaluate_expression(expr["else"], bindings)
+                
+            elif expr["type"] == "return_stmt":
+                return self._evaluate_expression(expr["value"], bindings)
+            
+            elif expr["type"] == "comparison":
+                left = self._evaluate_expression(expr["left"], bindings)
+                right = self._evaluate_expression(expr["right"], bindings)
+                op = expr["op"]
+                
+                if op == ">":
+                    return left > right
+                elif op == "<":
+                    return left < right
+                elif op == ">=":
+                    return left >= right
+                elif op == "<=":
+                    return left <= right
+                elif op == "=":
+                    return left == right
+                elif op == "!=":
+                    return left != right
+                else:
+                    raise ValueError(f"Unknown operator: {op}")
+                
+            elif expr["type"] == "arithmetic":
+                left = self._evaluate_expression(expr["left"], bindings)
+                right = self._evaluate_expression(expr["right"], bindings)
+                op = expr["op"]
+                
+                if op == "+":
+                    return left + right
+                elif op == "-":
+                    return left - right
+                elif op == "*":
+                    return left * right
+                elif op == "/":
+                    return left / right
+                else:
+                    raise ValueError(f"Unknown operator: {op}")
+                
+            elif expr["type"] == "function_call":
+                # Handle nested function calls
+                args = []
+                for arg in expr["arguments"]:
+                    args.append(self._evaluate_expression(arg, bindings))
+                return self.execute_function(expr["function_name"], args)
+            
             else:
-                value_str = str(value)
-            expr = expr.replace(var_name, value_str)
+                raise ValueError(f"Unknown expression type: {expr['type']}")
             
-        # Remove RETURN keyword and semicolons
-        expr = expr.replace("RETURN", "").replace(";", "").strip()
-        
-        try:
-            # Add proper boolean handling
-            if expr.lower() in ('true', 'false'):
+        # If expr is a string, it might be a variable name or literal
+        if isinstance(expr, str):
+            # Replace variables with their values
+            if expr in bindings:
+                return bindings[expr]
+            elif expr.lower() in ('true', 'false'):
                 return expr.lower() == 'true'
-            
-            # Evaluate the expression
-            result = eval(expr)
-            
-            # Convert result to appropriate type
-            if isinstance(result, bool):
-                return result  # Return boolean as is
-            elif isinstance(result, (int, float)):
-                return float(result)  # Convert numeric results to float
-            return result
-        except Exception as e:
-            raise ValueError(f"Error evaluating expression '{expr}': {str(e)}")
+            else:
+                # Try to evaluate as a literal
+                try:
+                    if '.' in expr:
+                        return float(expr)
+                    return int(expr)
+                except ValueError:
+                    return expr
+                
+        # If expr is already a value (number, bool, etc.), return it as is
+        return expr
         
     def list_functions(self) -> Dict[str, Dict[str, Any]]:
         """List all registered functions."""

@@ -30,8 +30,8 @@ def main():
                 continue
             elif sql_query.lower() == 'help':
                 print("\nExample queries:")
-                print("1. CREATE TABLE users (id INT, name TEXT, age INT, price FLOAT);")
-                print("2. INSERT INTO users (id, name, age, price) VALUES (1, 'Alice', 25, 100.0);")
+                print("1. CREATE TABLE users (id INT, name TEXT, age INT);")
+                print("2. INSERT INTO users (id, name, age) VALUES (1, 'Alice', 25);")
                 print("3. SELECT name, age FROM users WHERE age > 25;")
                 print("4. CREATE FUNCTION double_price(price FLOAT) RETURNS FLOAT")
                 print("   BEGIN")
@@ -51,56 +51,35 @@ def main():
                     with open(file_path, 'r') as f:
                         file_content = f.read()
                         
-                    # First, find and process all function definitions
-                    function_pattern = r'CREATE\s+FUNCTION\s+(\w+)\s*\((.*?)\)\s*RETURNS\s+(\w+)\s*BEGIN\s*(.*?)\s*END\s*;'
-                    function_matches = re.finditer(function_pattern, file_content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
-                    
-                    # Process function definitions
-                    for match in function_matches:
-                        name = match.group(1)
-                        params_str = match.group(2)
-                        return_type = match.group(3)
-                        body = match.group(4)
-                        
-                        # Parse parameters
-                        params = []
-                        if params_str.strip():
-                            for param in params_str.split(','):
-                                param_name, param_type = param.strip().split()
-                                params.append({"name": param_name, "type": param_type.upper()})
-                                
-                        # Create function definition
-                        function_def = {
-                            "name": name,
-                            "params": params,
-                            "return_type": return_type.upper(),
-                            "body": body.strip()
-                        }
-                        
-                        # Register function
-                        try:
-                            udf_manager.register_function(function_def)
-                            print(f"Created function: {name}")
-                        except Exception as e:
-                            print(f"Error creating function {name}: {str(e)}")
-                            
-                    # Remove function definitions from content
-                    file_content = re.sub(function_pattern, '', file_content)
-                    
-                    # Process remaining statements
+                    # Split content into statements
                     statements = []
                     current_stmt = []
+                    in_function_def = False
                     
-                    # Split remaining content into statements
                     for line in file_content.split('\n'):
-                        # Remove inline comments
+                        # Skip comments and empty lines
                         line = line.split('--')[0].strip()
                         if not line:
                             continue
                             
+                        # Check if we're starting a function definition
+                        if line.upper().startswith('CREATE FUNCTION'):
+                            in_function_def = True
+                            
                         current_stmt.append(line)
-                        if line.endswith(';'):
-                            statements.append(' '.join(current_stmt))
+                        
+                        # Check if we're ending a function definition
+                        if in_function_def and line.strip().endswith('END;'):
+                            stmt = ' '.join(current_stmt)
+                            if stmt.strip():
+                                statements.append(stmt)
+                            current_stmt = []
+                            in_function_def = False
+                        # For non-function statements, split on semicolon
+                        elif not in_function_def and line.endswith(';'):
+                            stmt = ' '.join(current_stmt)
+                            if stmt.strip():
+                                statements.append(stmt)
                             current_stmt = []
                             
                     # Execute each statement
@@ -109,23 +88,27 @@ def main():
                             continue
                             
                         print(f"\nExecuting: {stmt}")
-                        # Parse and execute each statement
-                        result = parser.parse(stmt)
-                        print("\nParsed SQL Query:")
-                        print(result)
-                        
-                        # Generate IR
-                        if isinstance(result, list):
-                            for single_stmt in result:
-                                ir = generate_ir(single_stmt)
+                        try:
+                            # Parse and execute each statement
+                            result = parser.parse(stmt)
+                            print("\nParsed SQL Query:")
+                            print(result)
+                            
+                            # Generate IR
+                            if isinstance(result, list):
+                                for single_stmt in result:
+                                    ir = generate_ir(single_stmt)
+                                    print("\nGenerated IR:")
+                                    print(ir)
+                                    execute_statement(ir, table_manager, udf_manager)
+                            else:
+                                ir = generate_ir(result)
                                 print("\nGenerated IR:")
                                 print(ir)
                                 execute_statement(ir, table_manager, udf_manager)
-                        else:
-                            ir = generate_ir(result)
-                            print("\nGenerated IR:")
-                            print(ir)
-                            execute_statement(ir, table_manager, udf_manager)
+                        except Exception as e:
+                            print(f"\nError executing statement: {str(e)}")
+                            continue
                         
                     print("\nFile execution completed.")
                     continue

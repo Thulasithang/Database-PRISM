@@ -1,27 +1,27 @@
 {
-  "name": "is_expensive",
+  "name": "is_adult",
   "params": [
     {
-      "name": "price",
+      "name": "age",
       "type": "INT"
     }
   ],
-  "return_type": "BOOL",
+  "return_type": "TEXT",
   "body": {
     "type": "if_stmt",
     "condition": {
       "type": "comparison",
-      "left": "price",
-      "op": ">",
-      "right": 100
+      "left": "age",
+      "op": ">=",
+      "right": 18
     },
     "then": {
       "type": "return_stmt",
-      "value": "true"
+      "value": "adult"
     },
     "else": {
       "type": "return_stmt",
-      "value": "false"
+      "value": "child"
     }
   }
 }

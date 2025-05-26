@@ -16,6 +16,16 @@ class UDFParser:
             RETURN a + b;
         END;
         
+        Or with if-else:
+        CREATE FUNCTION is_adult(age int) RETURNS bool
+        BEGIN
+            IF age >= 18 THEN
+                RETURN true;
+            ELSE
+                RETURN false;
+            END IF;
+        END;
+        
         Returns:
             Dict containing function name, params, return_type, and body
         """
@@ -45,7 +55,7 @@ class UDFParser:
         
         # Extract function body with more flexible whitespace handling
         body_match = re.search(
-            r'BEGIN\s*(.*?)\s*END',
+            r'BEGIN\s*(.*?)\s*END\s*;',
             udf_text,
             re.IGNORECASE | re.DOTALL
         )
@@ -55,19 +65,58 @@ class UDFParser:
             
         body = body_match.group(1).strip()
         
-        # Clean up the body
-        body = re.sub(r'\s+', ' ', body)  # Replace multiple whitespace with single space
-        body = re.sub(r';\s*$', '', body)  # Remove trailing semicolon
+        # Handle if-else conditions
+        if_match = re.match(
+            r'\s*IF\s+(.*?)\s+THEN\s*(.*?)\s*ELSE\s*(.*?)\s*END\s*IF\s*;',
+            body,
+            re.IGNORECASE | re.DOTALL
+        )
         
-        # Extract the expression after RETURN
-        body_match = re.match(r'RETURN\s+(.+)', body, re.IGNORECASE)
-        if not body_match:
-            raise ValueError("Invalid function body: must contain a RETURN statement")
+        if if_match:
+            condition = if_match.group(1).strip()
+            then_body = if_match.group(2).strip()
+            else_body = if_match.group(3).strip()
             
-        body = body_match.group(1).strip()
-        
-        # Remove any trailing semicolons
-        body = re.sub(r';\s*$', '', body)
+            # Extract return values from then and else bodies
+            then_return = re.match(r'RETURN\s+(.*?)\s*;', then_body, re.IGNORECASE)
+            else_return = re.match(r'RETURN\s+(.*?)\s*;', else_body, re.IGNORECASE)
+            
+            if not then_return or not else_return:
+                raise ValueError("Both IF and ELSE blocks must contain RETURN statements")
+                
+            # Split condition into parts
+            condition_parts = condition.split()
+            if len(condition_parts) != 3:
+                raise ValueError("Invalid condition format. Expected: <variable> <operator> <value>")
+                
+            # Create structured body
+            body = {
+                "type": "if_stmt",
+                "condition": {
+                    "type": "comparison",
+                    "left": condition_parts[0],
+                    "op": condition_parts[1],
+                    "right": condition_parts[2]
+                },
+                "then": {
+                    "type": "return_stmt",
+                    "value": then_return.group(1).strip()
+                },
+                "else": {
+                    "type": "return_stmt",
+                    "value": else_return.group(1).strip()
+                }
+            }
+        else:
+            # Handle simple return statement
+            return_match = re.match(r'RETURN\s+(.*?)\s*;', body, re.IGNORECASE)
+            if not return_match:
+                raise ValueError("Invalid function body: must contain a RETURN statement")
+            
+            body = {
+                "type": "return_stmt",
+                "value": return_match.group(1).strip()
+            }
         
         return {
             'name': name,
