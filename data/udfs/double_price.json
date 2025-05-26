@@ -1,0 +1,11 @@
+{
+  "name": "double_price",
+  "params": [
+    {
+      "name": "price",
+      "type": "float"
+    }
+  ],
+  "return_type": "float",
+  "body": "price * 2.0"
+}

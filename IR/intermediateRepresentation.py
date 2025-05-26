@@ -1,31 +1,106 @@
+from .udf.manager import UDFManager
+
+# Initialize the UDF manager as a global instance
+udf_manager = UDFManager()
+
 def generate_ir(parsed_query):
     # Step 1: Extract relevant information from the parsed query
     print("Generating IR from parsed query: ", parsed_query)
     type = parsed_query.get("type")
-    condition = "from" if type == "select" else "into" if type == "insert" else "table" if type == "create_table" else None
+    
+    # Handle UDF creation
+    if type == "create_function":
+        # Extract function definition parts
+        name = parsed_query.get("name")
+        params = parsed_query.get("params", [])
+        return_type = parsed_query.get("return_type")
+        body = parsed_query.get("body")
+        
+        if not all([name, return_type, body]):
+            raise ValueError("Missing required function definition parts")
+            
+        # Create function definition
+        function_def = {
+            "name": name,
+            "params": params,
+            "return_type": return_type,
+            "body": body
+        }
+        
+        return {
+            "type": "create_function",
+            "name": name,
+            "params": params,
+            "return_type": return_type,
+            "body": body
+        }
+    
+    # Handle regular queries
+    condition = "from" if type == "select" else "table" if type == "insert" else "table" if type == "create_table" else None
     print("condition: ", condition)
     table_name = parsed_query.get(condition, None)
     if not table_name:
+        # For INSERT statements, get table name from the 'into' field
+        if type == "insert":
+            table_name = parsed_query.get("into")
+            if not table_name:
+                raise ValueError("Table name not found in parsed query.")
+    elif not table_name:
         raise ValueError("Table name not found in parsed query.")
+        
     columns = parsed_query.get("columns", [])
-    filters = parsed_query.get("where", [])
-
-    print("type: ", type)
-    print("table_name: ", table_name)
-    print("filters: ", filters)
-    if filters:
-        for filter_condition in filters:
-            filters = [{"column": filter_condition["left"], "operator": filter_condition["op"], "value": filter_condition["right"]}]
     
-    print("filters: ", filters)
-
-    # Step 2: Create the intermediate representation
+    # Handle WHERE clause
+    where = parsed_query.get("where", [])
+    if where:
+        if isinstance(where, dict):
+            # Single filter condition
+            if where.get("type") == "function_call":
+                # Function call in WHERE clause
+                return {
+                    "type": type,
+                    "table": table_name,
+                    "columns": columns,
+                    "where": where  # Keep the function call structure intact
+                }
+            else:
+                return {
+                    "type": type,
+                    "table": table_name,
+                    "columns": columns,
+                    "where": where  # Keep the comparison structure intact
+                }
+        else:
+            # Multiple filter conditions
+            filters = []
+            for filter_condition in where:
+                if filter_condition.get("type") == "function_call":
+                    # Function call in WHERE clause
+                    filters.append(filter_condition)  # Keep the function call structure intact
+                else:
+                    filters.append({
+                        "column": filter_condition["left"],
+                        "operator": filter_condition["op"],
+                        "value": filter_condition["right"]
+                    })
+            return {
+                "type": type,
+                "table": table_name,
+                "columns": columns,
+                "where": filters
+            }
+    
+    # Create the intermediate representation
     ir = {
         "type": type,
         "table": table_name,
         "columns": columns,
-        "filters": filters
+        "where": []  # Empty where clause
     }
+    
+    # Add values for INSERT statements
+    if type == "insert":
+        ir["values"] = parsed_query.get("values", [])
 
     print("Generated IR: ", ir)
     return ir
@@ -34,6 +109,11 @@ import os
 import json
 from core.json_table import JSONTable
 def validate_ir(ir, schema):
+    # Handle UDF validation
+    if ir["type"] == "create_function":
+        # UDF validation is handled during registration
+        return True
+        
     # Step 1: Check if the table exists in the schema
     print("Validating IR: ", ir)
     if ir["type"] == "select":

@@ -1,0 +1,11 @@
+{
+  "name": "is_expensive",
+  "params": [
+    {
+      "name": "price",
+      "type": "float"
+    }
+  ],
+  "return_type": "int",
+  "body": "price > 50.0"
+}
