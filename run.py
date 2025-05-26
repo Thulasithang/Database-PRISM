@@ -1,5 +1,6 @@
 from parser.lark_parser import parser
 from IR.intermediateRepresentation import generate_ir, validate_ir, pretty_print_ir
+from planner.executor import Executor
 import json
 
 
@@ -23,11 +24,23 @@ while True:
         pretty_ir = pretty_print_ir(ir) if ir["type"] == "select" else ""
         print("Pretty Printed IR:")
         print(pretty_ir)
+
+        executor = Executor(table_name=ir["table"], storage_type="json")
+        if ir["type"] == "create_table":
+            executor.create_table(ir["columns"])
+        elif ir["type"] == "insert":
+            executor.insert(ir["values"])
+        elif ir["type"] == "select":
+            results = executor.select(ir["criteria"])
+            print("Query Results:")
+            for row in results:
+                print(row)
+
     except Exception as e:
         print("Error parsing SQL query:")
         print(e)
         # print("Please ensure your SQL syntax is correct.")
         # print("Example queries:")
         # print("1. SELECT name, age FROM users WHERE age >= 25 AND name != 'Alice'")
-        # print("2. INSERT INTO users (name, age) VALUES ('Bob', 30)")
+        # print("2. INSERT INTO users (id, name) VALUES (1, 'Bob')")
         # print("3. CREATE TABLE users (id INT, name TEXT)")
