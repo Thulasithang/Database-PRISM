@@ -1,0 +1,27 @@
+{
+  "name": "is_adult",
+  "params": [
+    {
+      "name": "age",
+      "type": "INT"
+    }
+  ],
+  "return_type": "TEXT",
+  "body": {
+    "type": "if_stmt",
+    "condition": {
+      "type": "comparison",
+      "left": "age",
+      "op": ">=",
+      "right": 18
+    },
+    "then": {
+      "type": "return_stmt",
+      "value": "adult"
+    },
+    "else": {
+      "type": "return_stmt",
+      "value": "child"
+    }
+  }
+}

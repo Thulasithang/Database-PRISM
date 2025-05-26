@@ -1,0 +1,19 @@
+{
+  "name": "price_plus_two",
+  "params": [
+    {
+      "name": "price",
+      "type": "INT"
+    }
+  ],
+  "return_type": "INT",
+  "body": {
+    "type": "return_stmt",
+    "value": {
+      "type": "arithmetic",
+      "left": "price",
+      "op": "+",
+      "right": 2
+    }
+  }
+}

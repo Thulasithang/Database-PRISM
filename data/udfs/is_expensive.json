@@ -1,0 +1,27 @@
+{
+  "name": "is_expensive",
+  "params": [
+    {
+      "name": "price",
+      "type": "INT"
+    }
+  ],
+  "return_type": "BOOL",
+  "body": {
+    "type": "if_stmt",
+    "condition": {
+      "type": "comparison",
+      "left": "price",
+      "op": ">",
+      "right": 100
+    },
+    "then": {
+      "type": "return_stmt",
+      "value": "true"
+    },
+    "else": {
+      "type": "return_stmt",
+      "value": "false"
+    }
+  }
+}
