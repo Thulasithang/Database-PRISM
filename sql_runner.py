@@ -1,10 +1,80 @@
 from parser.lark_parser import parser
-from IR.intermediateRepresentation import generate_ir, validate_ir, pretty_print_ir
+from IR.intermediateRepresentation import generate_ir, validate_ir, pretty_print_ir, inline_udf_in_ir
 from IR.udf.manager import UDFManager
 from core.table_manager import TableManager
 import json
 import os
 import re
+
+# Helper function to extract column dependencies from an expression node
+def get_column_dependencies(node, actual_table_columns):
+    dependencies = set()
+    if isinstance(node, str):
+        if node in actual_table_columns:
+            dependencies.add(node)
+    elif isinstance(node, dict):
+        if node.get("type") == "arithmetic" or node.get("type") == "comparison":
+            dependencies.update(get_column_dependencies(node.get("left"), actual_table_columns))
+            dependencies.update(get_column_dependencies(node.get("right"), actual_table_columns))
+        elif node.get("type") == "if_stmt":
+            dependencies.update(get_column_dependencies(node.get("condition"), actual_table_columns))
+            dependencies.update(get_column_dependencies(node.get("then"), actual_table_columns))
+            dependencies.update(get_column_dependencies(node.get("else"), actual_table_columns))
+        elif node.get("type") == "return_stmt":
+             dependencies.update(get_column_dependencies(node.get("value"), actual_table_columns))
+        elif node.get("type") == "inlined_expression":
+            dependencies.update(get_column_dependencies(node.get("expression"), actual_table_columns))
+    elif hasattr(node, 'type') and hasattr(node, 'value') and node.type == 'NAME':
+        if node.value in actual_table_columns:
+            dependencies.add(node.value)
+    return dependencies
+
+# Helper function to evaluate an inlined expression against a row of data
+def _evaluate_inlined_expr(expression_node, row_data):
+    if isinstance(expression_node, str):
+        return row_data.get(expression_node, expression_node)
+    elif isinstance(expression_node, (int, float, bool)):
+        return expression_node
+    elif isinstance(expression_node, dict):
+        expr_type = expression_node.get("type")
+        if expr_type == "arithmetic":
+            left = _evaluate_inlined_expr(expression_node["left"], row_data)
+            right = _evaluate_inlined_expr(expression_node["right"], row_data)
+            op = expression_node["op"]
+            if op == "+": return left + right
+            if op == "-": return left - right
+            if op == "*": return left * right
+            if op == "/": return left / right if right != 0 else None
+            raise ValueError(f"Unknown arithmetic operator: {op}")
+        elif expr_type == "comparison":
+            left = _evaluate_inlined_expr(expression_node["left"], row_data)
+            right = _evaluate_inlined_expr(expression_node["right"], row_data)
+            op = expression_node["op"]
+            if op == ">": return left > right
+            if op == "<": return left < right
+            if op == ">=": return left >= right
+            if op == "<=": return left <= right
+            if op == "=": return left == right
+            if op == "!=": return left != right
+            raise ValueError(f"Unknown comparison operator: {op}")
+        elif expr_type == "if_stmt":
+            condition_val = _evaluate_inlined_expr(expression_node["condition"], row_data)
+            if condition_val:
+                return _evaluate_inlined_expr(expression_node["then"], row_data)
+            else:
+                return _evaluate_inlined_expr(expression_node["else"], row_data)
+        elif expr_type == "return_stmt":
+            return _evaluate_inlined_expr(expression_node["value"], row_data)
+        elif expr_type == "literal":
+            return expression_node["value"]
+        elif expr_type == "inlined_expression":
+            return _evaluate_inlined_expr(expression_node.get("expression"), row_data)
+        else:
+            raise ValueError(f"Unsupported expression type for evaluation: {expr_type}")
+    elif hasattr(expression_node, 'type') and hasattr(expression_node, 'value') and expression_node.type == 'NAME':
+        return row_data.get(expression_node.value)
+    else:
+        return expression_node
 
 def execute_sql_command(sql_command: str, table_manager: TableManager, udf_manager: UDFManager) -> bool:
     """Execute a single SQL command and return the result."""
@@ -22,9 +92,21 @@ def execute_sql_command(sql_command: str, table_manager: TableManager, udf_manag
             
             if isinstance(result, list):
                 for single_stmt in result:
-                    success &= execute_statement(single_stmt, table_manager, udf_manager)
+                    # Generate IR for each statement
+                    ir = generate_ir(single_stmt) 
+                    print(f"Generated IR: {ir}")
+                    # Inline UDFs
+                    ir = inline_udf_in_ir(ir, udf_manager) 
+                    print(f"IR after UDF inlining: {ir}")
+                    success &= execute_statement(ir, table_manager, udf_manager)
             else:
-                success &= execute_statement(result, table_manager, udf_manager)
+                # Generate IR for the single statement
+                ir = generate_ir(result) 
+                print(f"Generated IR: {ir}")
+                # Inline UDFs
+                ir = inline_udf_in_ir(ir, udf_manager) 
+                print(f"IR after UDF inlining: {ir}")
+                success &= execute_statement(ir, table_manager, udf_manager)
                 
         return success
             
@@ -54,80 +136,104 @@ def execute_statement(ir: dict, table_manager: TableManager, udf_manager: UDFMan
             return True
             
         elif ir["type"] == "select":
-            # Get raw data first
+            # Get actual column names from the table schema for dependency checking
+            actual_table_columns = []
+            try:
+                # Assuming table_manager has a way to get schema to list actual columns
+                table_schema = table_manager.get_table_schema(ir["table"])
+                if table_schema and "columns" in table_schema:
+                    actual_table_columns = [col_def["name"] for col_def in table_schema["columns"]]
+            except ValueError:
+                 print(f"Warning: Could not retrieve schema for table {ir['table']} for column dependency check.")
+
+            columns_to_fetch = set()
+            for col_item in ir["columns"]:
+                if isinstance(col_item, str):
+                    columns_to_fetch.add(col_item)
+                elif hasattr(col_item, 'type') and col_item.type == 'NAME': 
+                    columns_to_fetch.add(col_item.value)
+                elif isinstance(col_item, dict) and col_item.get("type") == "inlined_expression":
+                    dependencies = get_column_dependencies(col_item["expression"], actual_table_columns)
+                    columns_to_fetch.update(dependencies)
+
+            if "where" in ir and ir["where"]:
+                if isinstance(ir["where"], dict):
+                    dependencies = get_column_dependencies(ir["where"], actual_table_columns)
+                    columns_to_fetch.update(dependencies)
+                elif isinstance(ir["where"], list):
+                    for condition_node in ir["where"]:
+                        dependencies = get_column_dependencies(condition_node, actual_table_columns)
+                        columns_to_fetch.update(dependencies)
+            
+            print(f"Fetching columns from TableManager: {list(columns_to_fetch)}")
             raw_results = table_manager.select_from(
-                ir["from"],
-                [col if isinstance(col, str) else col.get("arguments", [None])[0] for col in ir["columns"]],
-                []  # We'll handle WHERE clause separately
+                ir["table"], # Corrected from ir["from"] which might be a Lark specific detail pre-IR generation
+                list(columns_to_fetch) if columns_to_fetch else ["*"],
+                ir.get("where", []) 
             )
             
-            # Process results with function calls
             results = []
-            seen_rows = set()  # To prevent duplicates
+            seen_rows = set()
             
-            for row in raw_results:
-                # First check WHERE clause if it exists
+            for row_dict in raw_results: 
+                passes_where = True
                 if "where" in ir and ir["where"]:
-                    where_clause = ir["where"]
-                    if isinstance(where_clause, dict) and where_clause["type"] == "function_call":
-                        # Get function arguments from the row
-                        args = []
-                        for arg in where_clause["arguments"]:
-                            if isinstance(arg, str):
-                                args.append(float(row[str(arg)]))  # Convert to float for numeric functions
-                            else:
-                                args.append(arg)
-                        # Call the function
-                        result = udf_manager.execute_function(where_clause["function_name"], args)
-                        if not result:  # Skip this row if the WHERE condition is not met
-                            continue
+                    if isinstance(ir["where"], dict):
+                        if ir["where"].get("type") == "inlined_expression":
+                            eval_result = _evaluate_inlined_expr(ir["where"]["expression"], row_dict)
+                            if not eval_result:
+                                passes_where = False
+                        elif "type" in ir["where"]:
+                            eval_result = _evaluate_inlined_expr(ir["where"], row_dict)
+                            if not eval_result:
+                                passes_where = False
                 
-                # Process selected columns
+                if not passes_where:
+                    continue
+
                 processed_row = {}
-                for i, col in enumerate(ir["columns"]):
-                    if isinstance(col, dict) and col["type"] == "function_call":
-                        # Get function arguments from the row
-                        args = []
-                        for arg in col["arguments"]:
-                            if isinstance(arg, str):
-                                args.append(float(row[str(arg)]))  # Convert to float for numeric functions
+                for i, col_item in enumerate(ir["columns"]):
+                    col_alias = f"col_{i}"
+                    value = None
+                    if isinstance(col_item, str):
+                        col_alias = col_item
+                        value = row_dict.get(col_item)
+                    elif hasattr(col_item, 'type') and col_item.type == 'NAME':
+                        col_alias = col_item.value
+                        value = row_dict.get(col_item.value)
+                    elif isinstance(col_item, dict) and col_item.get("type") == "inlined_expression":
+                        orig_call = col_item["original_function_call"]
+                        func_name = orig_call["function_name"]
+                        arg_strings = []
+                        for arg in orig_call["arguments"]:
+                            if hasattr(arg, 'type') and arg.type == 'NAME':
+                                arg_strings.append(arg.value)
+                            elif isinstance(arg, str):
+                                arg_strings.append(f"'{arg}'")
                             else:
-                                args.append(arg)
-                        # Call the function
-                        result = udf_manager.execute_function(col["function_name"], args)
-                        # Use a more descriptive column name
-                        col_name = f"{col['function_name']}({','.join(str(arg) for arg in col['arguments'] if isinstance(arg, str))})"
-                        processed_row[col_name] = result
-                    else:
-                        processed_row[str(col)] = row[str(col)]
+                                arg_strings.append(str(arg))
+                        col_alias = f"{func_name}({', '.join(arg_strings)})"
+                        value = _evaluate_inlined_expr(col_item["expression"], row_dict)
+                    
+                    processed_row[col_alias] = value
                 
-                # Convert row to a tuple for hashing (to prevent duplicates)
                 row_tuple = tuple(sorted(processed_row.items()))
                 if row_tuple not in seen_rows:
                     seen_rows.add(row_tuple)
                     results.append(processed_row)
             
-            # Pretty print results
             if results:
-                # Get column names in the correct order
                 headers = []
-                for col in ir["columns"]:
-                    if isinstance(col, dict) and col["type"] == "function_call":
-                        # Use argument names in the column name
-                        col_name = f"{col['function_name']}({','.join(str(arg) for arg in col['arguments'] if isinstance(arg, str))})"
-                        headers.append(col_name)
-                    else:
-                        headers.append(str(col))
+                if results:
+                    headers = list(results[0].keys())
                 
-                # Print header
                 header_str = " | ".join(str(h) for h in headers)
                 print("-" * len(header_str))
                 print(header_str)
                 print("-" * len(header_str))
                 
-                # Print rows
-                for row in results:
-                    print(" | ".join(str(row[h]) for h in headers))
+                for res_row in results:
+                    print(" | ".join(str(res_row.get(h, "NULL")) for h in headers))
                 print("-" * len(header_str))
             else:
                 print("No results found.")

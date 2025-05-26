@@ -105,6 +105,68 @@ def generate_ir(parsed_query):
     print("Generated IR: ", ir)
     return ir
 
+def _replace_params(body, params, args):
+    """Helper function to replace parameter placeholders with actual arguments."""
+    if isinstance(body, str):
+        for i, param in enumerate(params):
+            if body == param["name"]:
+                # If the argument is a string literal, keep it as is (remove quotes if any)
+                if isinstance(args[i], str):
+                    return args[i].strip("'\"") 
+                return args[i]
+        return body
+    elif isinstance(body, dict):
+        new_body = {}
+        for key, value in body.items():
+            new_body[key] = _replace_params(value, params, args)
+        return new_body
+    elif isinstance(body, list):
+        return [_replace_params(item, params, args) for item in body]
+    else:
+        return body
+
+def inline_udf_in_ir(ir, udf_manager: UDFManager):
+    """Recursively traverse the IR and inline UDFs."""
+    if isinstance(ir, dict):
+        if ir.get("type") == "function_call":
+            function_name = ir.get("function_name")
+            arguments = ir.get("arguments", [])
+            
+            # Get UDF definition
+            udf_def = udf_manager.get_function(function_name)
+            if not udf_def:
+                raise ValueError(f"UDF '{function_name}' not found.")
+
+            # Replace parameters in the UDF body with actual arguments
+            # The body is directly the expression to be inlined
+            # For IF statements, this will become a CASE WHEN
+            inlined_body = _replace_params(udf_def["body"], udf_def["params"], arguments)
+            
+            # Return the inlined expression directly
+            return {
+                "type": "inlined_expression",
+                "original_function_call": { # Store essential parts of the original call for aliasing
+                    "function_name": function_name,
+                    "arguments": arguments # These are already processed by _replace_params if they were params themselves
+                                          # Or they are Tokens/literals from the original call
+                },
+                "expression": inlined_body
+            }
+            
+        else:
+            # Recursively process other parts of the IR
+            new_ir = {}
+            for key, value in ir.items():
+                new_ir[key] = inline_udf_in_ir(value, udf_manager)
+            return new_ir
+            
+    elif isinstance(ir, list):
+        return [inline_udf_in_ir(item, udf_manager) for item in ir]
+        
+    else:
+        # Base case: not a dict or list, or not a function call
+        return ir
+
 import os
 import json
 from core.json_table import JSONTable
