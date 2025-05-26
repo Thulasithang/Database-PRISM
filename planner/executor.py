@@ -4,7 +4,7 @@ from core.base_table import BaseTable
 import operator
 
 ops = {
-    "==": operator.eq,
+    "=": operator.eq,
     "!=": operator.ne,
     "<": operator.lt,
     "<=": operator.le,
@@ -60,7 +60,7 @@ class Executor:
         table.save()
         # self.storage.insert(values)
 
-    def select(self, criteria: List[dict] = []) -> List[dict]:
+    def select(self, criteria: List[dict] = [], columns: List[str] = ['all']) -> List[dict]:
         """
         Select rows from the table based on the given criteria.
 
@@ -78,6 +78,8 @@ class Executor:
         
         print("Selecting rows with criteria:", criteria)
         all_rows = self.storage.select_all()
+        if columns == ['all']:
+            columns = self.storage.columns
         if len(criteria) == 0:
             return all_rows
         filtered_rows = [
@@ -88,6 +90,11 @@ class Executor:
                 if condition["operator"] in ops and condition["column"] in row
             )
         ]
+        if columns != ['all']:
+            filtered_rows = [
+                {col: row[col] for col in columns if col in row}
+                for row in filtered_rows
+            ]
         if len(filtered_rows) == 0:
             return None
         else:

@@ -31,7 +31,7 @@ while True:
         elif ir["type"] == "insert":
             executor.insert(ir["values"])
         elif ir["type"] == "select":
-            results = executor.select(ir["filters"])
+            results = executor.select(ir["filters"], ir["columns"])
             print("Query Results:")
             if results:
                 for row in results:
