@@ -5,6 +5,7 @@ from core.table_manager import TableManager
 import json
 import os
 import re
+import time
 
 # Helper function to extract column dependencies from an expression node
 def get_column_dependencies(node, actual_table_columns):
@@ -86,19 +87,21 @@ def execute_sql_command(sql_command: str, table_manager: TableManager, udf_manag
         success = True
         for stmt in statements:
             print(f"\nExecuting statement: {stmt}")
+            start_time_stmt = time.time()
             # Parse and execute the command
             result = parser.parse(stmt + ";")  # Add back the semicolon
             print(f"Parsed result: {result}")
             
+            current_stmt_success = True
             if isinstance(result, list):
-                for single_stmt in result:
+                for single_stmt_parsed in result: # Renamed to avoid conflict
                     # Generate IR for each statement
-                    ir = generate_ir(single_stmt) 
+                    ir = generate_ir(single_stmt_parsed) 
                     print(f"Generated IR: {ir}")
                     # Inline UDFs
                     ir = inline_udf_in_ir(ir, udf_manager) 
                     print(f"IR after UDF inlining: {ir}")
-                    success &= execute_statement(ir, table_manager, udf_manager)
+                    current_stmt_success &= execute_statement(ir, table_manager, udf_manager)
             else:
                 # Generate IR for the single statement
                 ir = generate_ir(result) 
@@ -106,7 +109,12 @@ def execute_sql_command(sql_command: str, table_manager: TableManager, udf_manag
                 # Inline UDFs
                 ir = inline_udf_in_ir(ir, udf_manager) 
                 print(f"IR after UDF inlining: {ir}")
-                success &= execute_statement(ir, table_manager, udf_manager)
+                current_stmt_success = execute_statement(ir, table_manager, udf_manager)
+            
+            end_time_stmt = time.time()
+            duration_stmt = end_time_stmt - start_time_stmt
+            print(f"Statement executed in {duration_stmt:.4f} seconds.")
+            success &= current_stmt_success
                 
         return success
             
@@ -272,6 +280,7 @@ def run_sql_file(file_path: str) -> bool:
         return False
         
     try:
+        start_time = time.time() # Record start time
         # Initialize managers
         table_manager = TableManager()
         udf_manager = UDFManager()
@@ -340,6 +349,9 @@ def run_sql_file(file_path: str) -> bool:
             if stmt.strip():
                 success &= execute_sql_command(stmt, table_manager, udf_manager)
                 
+        end_time = time.time() # Record end time
+        duration = end_time - start_time
+        print(f"\nSQL file '{file_path}' executed in {duration:.4f} seconds.")
         return success
         
     except Exception as e:

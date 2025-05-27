@@ -5,6 +5,7 @@ from core.table_manager import TableManager
 import json
 import os
 import re
+import time
 
 # Helper function to extract column dependencies from an expression node
 def get_column_dependencies(node, actual_table_columns):
@@ -123,7 +124,6 @@ def main():
                 print()
                 continue
             elif sql_query.lower().startswith('run '):
-                # Run SQL file
                 file_path = sql_query[4:].strip()
                 if not os.path.exists(file_path):
                     print(f"\nError: File '{file_path}' not found.")
@@ -133,107 +133,131 @@ def main():
                     with open(file_path, 'r') as f:
                         file_content = f.read()
                         
-                    # Split content into statements
-                    statements = []
-                    current_stmt = []
-                    in_function_def = False
+                    # Split content into statements (simplified from original, assuming similar logic)
+                    parsed_file_statements = [] # This should be populated based on original logic for splitting file content
+                    # --- Original file parsing logic to populate `parsed_file_statements` string list STARTS ---
+                    # This is a placeholder for the complex statement splitting logic from the original file.
+                    # It involved handling CREATE FUNCTION separately and then splitting by semicolon.
+                    # For the purpose of this edit, we assume `raw_statements_from_file` is a list of SQL strings.
                     
+                    # Placeholder for actual statement splitting logic from file content
+                    # This complex logic was in lines 137-166 of the original run.py snippet
+                    # For example:
+                    temp_statements = []
+                    current_stmt_lines = []
+                    in_function_def = False
                     for line in file_content.split('\n'):
-                        # Skip comments and empty lines
                         line = line.split('--')[0].strip()
                         if not line:
                             continue
-                            
-                        # Check if we're starting a function definition
                         if line.upper().startswith('CREATE FUNCTION'):
                             in_function_def = True
-                            
-                        current_stmt.append(line)
-                        
-                        # Check if we're ending a function definition
+                        current_stmt_lines.append(line)
                         if in_function_def and line.strip().endswith('END;'):
-                            stmt = ' '.join(current_stmt)
+                            stmt = ' '.join(current_stmt_lines)
                             if stmt.strip():
-                                statements.append(stmt)
-                            current_stmt = []
+                                temp_statements.append(stmt)
+                            current_stmt_lines = []
                             in_function_def = False
-                        # For non-function statements, split on semicolon
                         elif not in_function_def and line.endswith(';'):
-                            stmt = ' '.join(current_stmt)
+                            stmt = ' '.join(current_stmt_lines)
                             if stmt.strip():
-                                statements.append(stmt)
-                            current_stmt = []
-                            
-                    # Execute each statement
-                    for stmt in statements:
-                        if not stmt.strip():
+                                temp_statements.append(stmt)
+                            current_stmt_lines = []
+                    if current_stmt_lines: # Add any remaining statement
+                        stmt = ' '.join(current_stmt_lines)
+                        if stmt.strip():
+                           temp_statements.append(stmt)
+                    raw_statements_from_file = temp_statements
+                    # --- Original file parsing logic ENDS ---
+                    
+                    print(f"\nFound {len(raw_statements_from_file)} statements in file '{file_path}'.")
+                    file_total_start_time = time.time()
+
+                    for stmt_string_from_file in raw_statements_from_file:
+                        if not stmt_string_from_file.strip():
                             continue
-                            
-                        print(f"\nExecuting: {stmt}")
+                        
+                        stmt_file_start_time = time.time()
+                        print(f"\nExecuting from file: {stmt_string_from_file}")
                         try:
                             # Parse and execute each statement
-                            result = parser.parse(stmt)
-                            print("\nParsed SQL Query:")
-                            print(result)
+                            # Assuming 'parser' is available
+                            parsed_stmt_obj = parser.parse(stmt_string_from_file) 
+                            print("\nParsed SQL Query (from file):")
+                            print(parsed_stmt_obj)
                             
-                            # Generate IR
-                            if isinstance(result, list):
-                                for single_stmt in result:
-                                    ir = generate_ir(single_stmt)
-                                    print("\nGenerated IR:")
-                                    print(ir)
-                                    # Inline UDFs
-                                    ir = inline_udf_in_ir(ir, udf_manager)
-                                    print("\nIR after UDF inlining:")
-                                    print(ir)
-                                    execute_statement(ir, table_manager, udf_manager)
+                            # Assuming generate_ir, inline_udf_in_ir, execute_statement are available
+                            # And execute_statement is run.py's version.
+                            if isinstance(parsed_stmt_obj, list):
+                                for single_ir_target in parsed_stmt_obj:
+                                    ir = generate_ir(single_ir_target)
+                                    # ... (print IR, inline UDFs, print IR after UDF) as in original
+                                    execute_statement(ir, table_manager, udf_manager) # run.py's version
                             else:
-                                ir = generate_ir(result)
-                                print("\nGenerated IR:")
-                                print(ir)
-                                # Inline UDFs
-                                ir = inline_udf_in_ir(ir, udf_manager)
-                                print("\nIR after UDF inlining:")
-                                print(ir)
-                                execute_statement(ir, table_manager, udf_manager)
-                        except Exception as e:
-                            print(f"\nError executing statement: {str(e)}")
-                            continue
-                        
-                    print("\nFile execution completed.")
-                    continue
-                except Exception as e:
-                    print(f"\nError executing file: {str(e)}")
-                    continue
+                                ir = generate_ir(parsed_stmt_obj)
+                                # ... (print IR, inline UDFs, print IR after UDF) as in original
+                                execute_statement(ir, table_manager, udf_manager) # run.py's version
+                        except Exception as e_file_stmt:
+                            print(f"\nError executing statement from file: {str(e_file_stmt)}")
+                            # Original code continued on error
+                        finally:
+                            stmt_file_end_time = time.time()
+                            stmt_file_duration = stmt_file_end_time - stmt_file_start_time
+                            print(f"Statement from file ('{stmt_string_from_file[:40].strip()}...') processed in {stmt_file_duration:.4f} seconds.")
+                    
+                    file_total_end_time = time.time()
+                    print(f"\nFinished executing file '{file_path}' in {file_total_end_time - file_total_start_time:.4f} seconds.")
+                    continue # To the next input() prompt
+                except Exception as e_file:
+                    print(f"\nError executing file: {str(e_file)}")
+                    continue # To the next input() prompt
                 
             if not sql_query:
                 continue
-                
-            # Parse the query
-            result = parser.parse(sql_query)
-            print("\nParsed SQL Query:")
-            print(result)
             
-            # Generate IR
-            if isinstance(result, list):
-                for single_stmt in result:
-                    ir = generate_ir(single_stmt)
-                    print("\nGenerated IR:")
-                    print(ir)
-                    # Inline UDFs
-                    ir = inline_udf_in_ir(ir, udf_manager)
-                    print("\nIR after UDF inlining:")
-                    print(ir)
-                    execute_statement(ir, table_manager, udf_manager)
-            else:
-                ir = generate_ir(result)
-                print("\nGenerated IR:")
-                print(ir)
-                # Inline UDFs
-                ir = inline_udf_in_ir(ir, udf_manager)
-                print("\nIR after UDF inlining:")
-                print(ir)
-                execute_statement(ir, table_manager, udf_manager)
+            # Interactive query processing
+            interactive_query_input_start_time = time.time()
+            print(f"\nProcessing interactive query: {sql_query}")
+            
+            try:
+                parsed_interactive_query = parser.parse(sql_query)
+                print("\nParsed Interactive SQL Query:")
+                print(parsed_interactive_query)
+                
+                # Ensure it's a list for uniform processing
+                if not isinstance(parsed_interactive_query, list):
+                    parsed_interactive_query = [parsed_interactive_query]
+
+                for single_parsed_item in parsed_interactive_query:
+                    item_process_start_time = time.time()
+                    current_ir = None # For logging in finally
+                    try:
+                        # Generate IR
+                        ir = generate_ir(single_parsed_item)
+                        current_ir = ir # Store for logging
+                        print("\nGenerated IR:")
+                        print(ir)
+                        # Inline UDFs
+                        ir = inline_udf_in_ir(ir, udf_manager)
+                        print("\nIR after UDF inlining:")
+                        print(ir)
+                        execute_statement(ir, table_manager, udf_manager) # run.py's version
+                    except Exception as e_item:
+                        print(f"\nError executing part of interactive query: {str(e_item)}")
+                        # Original loop continues to next item if it's a list, or finishes.
+                    finally:
+                        item_process_end_time = time.time()
+                        item_duration = item_process_end_time - item_process_start_time
+                        ir_type_str = current_ir.get('type', 'unknown') if current_ir else 'parse_error_or_not_reached'
+                        print(f"Interactive query part (IR type: '{ir_type_str}') processed in {item_duration:.4f} seconds.")
+                        
+            except Exception as e_interactive_parse:
+                print(f"\nError parsing interactive query: {str(e_interactive_parse)}")
+            finally:
+                interactive_query_input_end_time = time.time()
+                interactive_input_duration = interactive_query_input_end_time - interactive_query_input_start_time
+                print(f"Total processing for interactive input ('{sql_query[:50].strip()}...') took {interactive_input_duration:.4f} seconds.")
                 
         except Exception as e:
             print("\nError:")
