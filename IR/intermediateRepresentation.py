@@ -7,7 +7,7 @@ def generate_ir(parsed_query):
     # Step 1: Extract relevant information from the parsed query
     print("Generating IR from parsed query: ", parsed_query)
     type = parsed_query.get("type")
-
+    
     # Handle UDF creation
     if type == "create_function":
         # Extract function definition parts
@@ -15,10 +15,18 @@ def generate_ir(parsed_query):
         params = parsed_query.get("params", [])
         return_type = parsed_query.get("return_type")
         body = parsed_query.get("body")
-
+        
         if not all([name, return_type, body]):
             raise ValueError("Missing required function definition parts")
-
+            
+        # Create function definition
+        function_def = {
+            "name": name,
+            "params": params,
+            "return_type": return_type,
+            "body": body
+        }
+        
         return {
             "type": "create_function",
             "name": name,
@@ -26,44 +34,49 @@ def generate_ir(parsed_query):
             "return_type": return_type,
             "body": body
         }
-
-    # Determine the field that holds the table name
-    condition = "from" if type == "select" else "table" if type in ["insert", "create_table"] else None
+    
+    # Handle regular queries
+    condition = "from" if type == "select" else "table" if type == "insert" else "table" if type == "create_table" else None
     print("condition: ", condition)
-    table_name = parsed_query.get(condition)
-    if not table_name and type == "insert":
-        table_name = parsed_query.get("into")
-        if not table_name:
-            raise ValueError("Table name not found in parsed query.")
+    table_name = parsed_query.get(condition, None)
+    if not table_name:
+        # For INSERT statements, get table name from the 'into' field
+        if type == "insert":
+            table_name = parsed_query.get("into")
+            if not table_name:
+                raise ValueError("Table name not found in parsed query.")
     elif not table_name:
         raise ValueError("Table name not found in parsed query.")
-
+        
     columns = parsed_query.get("columns", [])
-    values = parsed_query.get("values", [])
-    where = parsed_query.get("where", [])
-    filters = []
-
+    
     # Handle WHERE clause
+    where = parsed_query.get("where", [])
     if where:
         if isinstance(where, dict):
+            # Single filter condition
             if where.get("type") == "function_call":
+                # Function call in WHERE clause
                 return {
                     "type": type,
                     "table": table_name,
                     "columns": columns,
-                    "where": where
+                    "where": where  # Keep the function call structure intact
                 }
             else:
                 return {
                     "type": type,
                     "table": table_name,
                     "columns": columns,
-                    "where": where
+                    "where": where  # Keep the comparison structure intact
                 }
         else:
+            # Multiple filter conditions
+            filters = []
             for filter_condition in where:
                 if filter_condition.get("type") == "function_call":
-                    filters.append(filter_condition)
+                    # Function call in WHERE clause
+                    filters.append(filter_condition)  # Keep the function call structure intact
                 else:
                     filters.append({
                         "column": filter_condition["left"],
@@ -76,19 +89,83 @@ def generate_ir(parsed_query):
                 "columns": columns,
                 "where": filters
             }
-
-    # Build IR for statements without WHERE clause
+    
+    # Create the intermediate representation
     ir = {
         "type": type,
         "table": table_name,
         "columns": columns,
-        "filters": filters,
-        "values": values
+        "where": []  # Empty where clause
     }
+    
+    # Add values for INSERT statements
+    if type == "insert":
+        ir["values"] = parsed_query.get("values", [])
 
     print("Generated IR: ", ir)
     return ir
 
+def _replace_params(body, params, args):
+    """Helper function to replace parameter placeholders with actual arguments."""
+    if isinstance(body, str):
+        for i, param in enumerate(params):
+            if body == param["name"]:
+                # If the argument is a string literal, keep it as is (remove quotes if any)
+                if isinstance(args[i], str):
+                    return args[i].strip("'\"") 
+                return args[i]
+        return body
+    elif isinstance(body, dict):
+        new_body = {}
+        for key, value in body.items():
+            new_body[key] = _replace_params(value, params, args)
+        return new_body
+    elif isinstance(body, list):
+        return [_replace_params(item, params, args) for item in body]
+    else:
+        return body
+
+def inline_udf_in_ir(ir, udf_manager: UDFManager):
+    """Recursively traverse the IR and inline UDFs."""
+    if isinstance(ir, dict):
+        if ir.get("type") == "function_call":
+            function_name = ir.get("function_name")
+            arguments = ir.get("arguments", [])
+            
+            # Get UDF definition
+            udf_def = udf_manager.get_function(function_name)
+            if not udf_def:
+                raise ValueError(f"UDF '{function_name}' not found.")
+
+            # Replace parameters in the UDF body with actual arguments
+            # The body is directly the expression to be inlined
+            # For IF statements, this will become a CASE WHEN
+            inlined_body = _replace_params(udf_def["body"], udf_def["params"], arguments)
+            
+            # Return the inlined expression directly
+            return {
+                "type": "inlined_expression",
+                "original_function_call": { # Store essential parts of the original call for aliasing
+                    "function_name": function_name,
+                    "arguments": arguments # These are already processed by _replace_params if they were params themselves
+                                          # Or they are Tokens/literals from the original call
+                },
+                "expression": inlined_body
+            }
+            
+        else:
+            # Recursively process other parts of the IR
+            new_ir = {}
+            for key, value in ir.items():
+                new_ir[key] = inline_udf_in_ir(value, udf_manager)
+            return new_ir
+            
+    elif isinstance(ir, list):
+        return [inline_udf_in_ir(item, udf_manager) for item in ir]
+        
+    else:
+        # Base case: not a dict or list, or not a function call
+        return ir
 
 import os
 import json
