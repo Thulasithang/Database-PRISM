@@ -110,7 +110,6 @@ def _replace_params(body, params, args):
     if isinstance(body, str):
         for i, param in enumerate(params):
             if body == param["name"]:
-                # If the argument is a string literal, keep it as is (remove quotes if any)
                 if isinstance(args[i], str):
                     return args[i].strip("'\"") 
                 return args[i]
@@ -137,18 +136,14 @@ def inline_udf_in_ir(ir, udf_manager: UDFManager):
             if not udf_def:
                 raise ValueError(f"UDF '{function_name}' not found.")
 
-            # Replace parameters in the UDF body with actual arguments
-            # The body is directly the expression to be inlined
-            # For IF statements, this will become a CASE WHEN
             inlined_body = _replace_params(udf_def["body"], udf_def["params"], arguments)
             
             # Return the inlined expression directly
             return {
                 "type": "inlined_expression",
-                "original_function_call": { # Store essential parts of the original call for aliasing
+                "original_function_call": { 
                     "function_name": function_name,
-                    "arguments": arguments # These are already processed by _replace_params if they were params themselves
-                                          # Or they are Tokens/literals from the original call
+                    "arguments": arguments 
                 },
                 "expression": inlined_body
             }
