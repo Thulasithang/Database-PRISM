@@ -30,6 +30,7 @@ class JSONTable(BaseTable):
         Raises:
             ValueError: If number of values does not match number of columns.
         """
+        print(f"Inserting values into table '{self.name}': {values}")
         if len(values) != len(self.columns):
             raise ValueError("Number of values must match number of columns.")
         self.rows.append(values)
@@ -52,6 +53,7 @@ class JSONTable(BaseTable):
         """
         os.makedirs(base_path, exist_ok=True)
         filepath = os.path.join(base_path, f"{self.name}.json")
+        print("rows to add: ", self.rows)
         with open(filepath, "w") as f:
             json.dump({
                 "name": self.name,
