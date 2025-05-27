@@ -5,6 +5,7 @@ from core.table_manager import TableManager
 import json
 import os
 import re
+import time
 
 def main():
     # Initialize managers
@@ -89,6 +90,8 @@ def main():
                             
                         print(f"\nExecuting: {stmt}")
                         try:
+                            start_time = time.time()
+                            
                             # Parse and execute each statement
                             result = parser.parse(stmt)
                             print("\nParsed SQL Query:")
@@ -106,6 +109,9 @@ def main():
                                 print("\nGenerated IR:")
                                 print(ir)
                                 execute_statement(ir, table_manager, udf_manager)
+                                
+                            end_time = time.time()
+                            print(f"\nTotal query time: {(end_time - start_time)*1000:.2f} ms")
                         except Exception as e:
                             print(f"\nError executing statement: {str(e)}")
                             continue
@@ -120,6 +126,8 @@ def main():
                 continue
                 
             # Parse the query
+            start_time = time.time()
+            
             result = parser.parse(sql_query)
             print("\nParsed SQL Query:")
             print(result)
@@ -137,6 +145,9 @@ def main():
                 print(ir)
                 execute_statement(ir, table_manager, udf_manager)
                 
+            end_time = time.time()
+            print(f"\nTotal query time: {(end_time - start_time)*1000:.2f} ms")
+                
         except Exception as e:
             print("\nError:")
             print(str(e))
@@ -148,18 +159,18 @@ def execute_statement(ir: dict, table_manager: TableManager, udf_manager: UDFMan
         print(f"\nExecuting statement of type: {ir['type']}")
         print("Statement IR: ", ir)
         
+        start_time = time.time()
+        
         # Handle different types of commands
         if ir["type"] == "create_table":
             # Create the table
             table_manager.create_table(ir["table"], ir["columns"])
             print(f"Created table: {ir['table']}")
-            return True
             
         elif ir["type"] == "insert":
             # Insert data into table
             table_manager.insert_into(ir["table"], ir["columns"], ir["values"])
             print(f"Inserted data into table: {ir['table']}")
-            return True
             
         elif ir["type"] == "select":
             # Get raw data first
@@ -239,8 +250,7 @@ def execute_statement(ir: dict, table_manager: TableManager, udf_manager: UDFMan
                 print("-" * len(header_str))
             else:
                 print("No results found.")
-            return True
-            
+                
         elif ir["type"] == "create_function":
             # Create function definition
             function_def = {
@@ -252,10 +262,13 @@ def execute_statement(ir: dict, table_manager: TableManager, udf_manager: UDFMan
             # Register the function with the UDF manager
             function_name = udf_manager.register_function(function_def)
             print(f"Created function: {function_name}")
-            return True
             
         else:
             raise ValueError(f"Unsupported command type: {ir['type']}")
+            
+        end_time = time.time()
+        print(f"\nExecution time: {(end_time - start_time)*1000:.2f} ms")
+        return True
             
     except Exception as e:
         print(f"Error executing statement: {str(e)}")
